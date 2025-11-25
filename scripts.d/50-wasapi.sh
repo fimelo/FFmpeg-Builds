@@ -59,6 +59,5 @@ ffbuild_unconfigure() {
     echo "DEBUG: ffbuild_unconfigure() called" >&2
     echo --disable-wasapi
 }
-
 echo "DEBUG: 50-wasapi.sh sourcing complete" >&2
 
