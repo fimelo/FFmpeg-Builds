@@ -1,0 +1,167 @@
+name: Build Official FFmpeg with WASAPI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    name: Build FFmpeg for Windows
+    runs-on: windows-latest
+    
+    steps:
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git
+            make
+            diffutils
+            pkg-config
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-nasm
+            mingw-w64-x86_64-yasm
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-meson
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-x264
+            mingw-w64-x86_64-x265
+            mingw-w64-x86_64-aom
+            mingw-w64-x86_64-dav1d
+
+      - name: Checkout FFmpeg
+        shell: msys2 {0}
+        run: |
+          echo "====== Cloning FFmpeg from official repository ======"
+          git clone --depth 1 https://github.com/FFmpeg/FFmpeg.git ffmpeg
+          cd ffmpeg
+          echo "====== Current FFmpeg version ======"
+          git log -1 --oneline
+          
+      - name: Check WASAPI support in FFmpeg
+        shell: msys2 {0}
+        run: |
+          cd ffmpeg
+          echo "====== Checking if FFmpeg supports WASAPI ======"
+          if grep -r "wasapi" configure; then
+            echo "✓ WASAPI is supported in configure script"
+          else
+            echo "✗ WASAPI not found in configure script"
+          fi
+          
+          echo ""
+          echo "====== Checking for WASAPI source files ======"
+          find . -name "*wasapi*" -type f || echo "No WASAPI files found"
+
+      - name: Configure FFmpeg
+        shell: msys2 {0}
+        run: |
+          cd ffmpeg
+          echo "====== Configuring FFmpeg with WASAPI ======"
+          ./configure \
+            --prefix=/mingw64 \
+            --arch=x86_64 \
+            --target-os=mingw32 \
+            --enable-gpl \
+            --enable-version3 \
+            --disable-debug \
+            --disable-w32threads \
+            --enable-pthreads \
+            --enable-static \
+            --disable-shared \
+            --enable-wasapi \
+            --enable-dshow \
+            --enable-gdigrab \
+            --enable-nvenc \
+            --enable-amf \
+            --enable-libx264 \
+            --enable-libx265 \
+            --enable-libaom \
+            --enable-libdav1d \
+            --extra-cflags="-I/mingw64/include" \
+            --extra-ldflags="-L/mingw64/lib" \
+            2>&1 | tee configure.log
+          
+          echo ""
+          echo "====== Checking configure result ======"
+          if grep -q "wasapi.*yes" ffbuild/config.log; then
+            echo "✓ WASAPI is ENABLED"
+          else
+            echo "✗ WASAPI is DISABLED"
+            echo ""
+            echo "====== Checking why WASAPI failed ======"
+            grep -A 5 "wasapi" ffbuild/config.log || echo "No wasapi info in config.log"
+          fi
+
+      - name: Build FFmpeg
+        shell: msys2 {0}
+        run: |
+          cd ffmpeg
+          echo "====== Building FFmpeg ======"
+          make -j$(nproc) 2>&1 | tee build.log
+          
+          echo ""
+          echo "====== Build completed ======"
+          ls -lh ffmpeg.exe ffprobe.exe ffplay.exe
+
+      - name: Verify WASAPI support
+        shell: msys2 {0}
+        run: |
+          cd ffmpeg
+          echo "====== Testing WASAPI support ======"
+          
+          echo ""
+          echo "=== 1. Check version and configuration ==="
+          ./ffmpeg.exe -version | grep -i wasapi || echo "No wasapi in version output"
+          
+          echo ""
+          echo "=== 2. List input devices ==="
+          ./ffmpeg.exe -devices 2>&1 | grep -A 20 "Devices:"
+          
+          echo ""
+          echo "=== 3. Test WASAPI format ==="
+          ./ffmpeg.exe -f wasapi -list_devices true -i dummy 2>&1 | head -20 || echo "WASAPI test failed"
+          
+          echo ""
+          if ./ffmpeg.exe -devices 2>&1 | grep -q "wasapi"; then
+            echo "✓✓✓ SUCCESS: WASAPI IS SUPPORTED! ✓✓✓"
+          else
+            echo "✗✗✗ FAILED: WASAPI IS NOT SUPPORTED ✗✗✗"
+          fi
+
+      - name: Package FFmpeg
+        shell: msys2 {0}
+        run: |
+          cd ffmpeg
+          echo "====== Creating package ======"
+          mkdir -p ../ffmpeg-wasapi-win64
+          cp ffmpeg.exe ffprobe.exe ffplay.exe ../ffmpeg-wasapi-win64/
+          
+          echo ""
+          echo "====== Copying dependencies ======"
+          ldd ffmpeg.exe | grep "/mingw64" | awk '{print $3}' | while read dll; do
+            cp "$dll" ../ffmpeg-wasapi-win64/ || true
+          done
+          
+          cd ..
+          echo ""
+          echo "====== Package contents ======"
+          ls -lh ffmpeg-wasapi-win64/
+
+      - name: Upload FFmpeg
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-wasapi-win64-official
+          path: ffmpeg-wasapi-win64/*
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            ffmpeg/configure.log
+            ffmpeg/build.log
+            ffmpeg/ffbuild/config.log
+
