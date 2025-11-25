@@ -1,16 +1,13 @@
 #!/bin/bash
 
-# WASAPI is a Windows Audio Session API for low-latency audio capture/playback
-# It's built into Windows (Vista and later), no external dependencies needed
-
-SCRIPT_SKIP="1"
+# WASAPI support for Windows
 
 ffbuild_enabled() {
     [[ $TARGET == win* ]]
 }
 
 ffbuild_dockerdl() {
-    true
+    return 0
 }
 
 ffbuild_dockerstage() {
